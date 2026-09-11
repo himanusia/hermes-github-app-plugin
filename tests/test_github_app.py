@@ -40,7 +40,7 @@ def test_github_app_identity_wins_over_pat_and_is_attributed() -> None:
     env = {
         "GITHUB_APP_ID": "123",
         "GITHUB_APP_INSTALLATION_ID": "42",
-        "GITHUB_APP_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\\nfake\\n-----END PRIVATE KEY-----",
+        "GITHUB_APP_PRIVATE_KEY": "fake-key-material",
         "GITHUB_APP_SLUG": "jarpis-bot",
         "GITHUB_TOKEN": "human-token",
     }
