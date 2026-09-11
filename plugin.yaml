@@ -1,0 +1,16 @@
+name: github_app
+version: 0.1.0
+description: "Standalone GitHub App connector with bot-first identity and attribution on every result."
+author: himanusia
+kind: backend
+provides_tools:
+  - github_identity
+  - github_create_issue
+  - github_comment_issue
+  - github_list_issues
+  - github_get_issue
+  - github_review_pr
+  - github_merge_pr
+pip_dependencies:
+  - "PyJWT>=2.8,<3"
+  - "cryptography>=42,<45"
