@@ -11,6 +11,6 @@ provides_tools:
   - github_get_issue
   - github_review_pr
   - github_merge_pr
-pip_dependencies:
+python_dependencies:
   - "PyJWT>=2.8,<3"
   - "cryptography>=42,<45"

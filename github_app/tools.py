@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from functools import wraps
 from typing import Any, Callable
 
 from .client import GitHubClient, GitHubError, parse_repo
-from .config import setting_bool
+from .config import load_github_env, setting_bool
 
 
 Json = dict[str, Any]
@@ -59,13 +60,24 @@ def _write_guard(ctx: object) -> str | None:
 def build_handlers(
     ctx: object,
     *,
-    client_factory: Callable[[], GitHubClient] = GitHubClient,
+    client_factory: Callable[..., GitHubClient] = GitHubClient,
 ) -> dict[str, Callable[..., str]]:
     """Build handlers bound to the operator's plugin settings."""
 
+    import threading
+    client_state = threading.local()
+
+    def managed_client() -> GitHubClient:
+        client = client_factory(env=load_github_env(ctx))
+        active = getattr(client_state, "clients", None)
+        if active is not None:
+            active.append(client)
+        return client
+
     def identity(args: Json, **kwargs: Any) -> str:
         try:
-            return _ok({"success": True, "action": "identity", **client_factory().verify_identity()})
+            client = managed_client()
+            return _ok({"success": True, "action": "identity", **client.verify_identity()})
         except Exception as exc:
             return _client_error(exc)
 
@@ -74,7 +86,7 @@ def build_handlers(
             return blocked
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             issue = client.create_issue(
                 owner,
                 repo,
@@ -100,7 +112,7 @@ def build_handlers(
             return blocked
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             comment = client.comment_issue(owner, repo, _number(args), str(args.get("body", "")))
             return _ok({
                 "success": True,
@@ -116,7 +128,7 @@ def build_handlers(
     def list_issues(args: Json, **kwargs: Any) -> str:
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             issues = client.list_issues(
                 owner,
                 repo,
@@ -154,7 +166,7 @@ def build_handlers(
     def get_issue(args: Json, **kwargs: Any) -> str:
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             issue = client.get_issue(owner, repo, _number(args), include_comments=bool(args.get("include_comments")))
             return _ok({
                 "success": True,
@@ -170,7 +182,7 @@ def build_handlers(
             return blocked
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             review = client.review_pull_request(
                 owner,
                 repo,
@@ -178,6 +190,7 @@ def build_handlers(
                 str(args.get("event", "")),
                 str(args.get("body", "") or ""),
                 args.get("comments"),
+                commit_id=str(args.get("commit_id", "") or ""),
             )
             return _ok({
                 "success": True,
@@ -195,13 +208,14 @@ def build_handlers(
             return blocked
         try:
             owner, repo = _repo(args)
-            client = client_factory()
+            client = managed_client()
             result = client.merge_pull_request(
                 owner,
                 repo,
                 _number(args),
                 method=str(args.get("method") or "squash"),
                 commit_title=str(args.get("commit_title", "") or ""),
+                expected_head_sha=str(args.get("expected_head_sha", "") or ""),
             )
             return _ok({
                 "success": bool(result.get("merged")),
@@ -215,7 +229,7 @@ def build_handlers(
         except Exception as exc:
             return _client_error(exc)
 
-    return {
+    handlers = {
         "github_identity": identity,
         "github_create_issue": create_issue,
         "github_comment_issue": comment_issue,
@@ -224,6 +238,22 @@ def build_handlers(
         "github_review_pr": review_pr,
         "github_merge_pr": merge_pr,
     }
+
+    def wrap(handler: Callable[..., str]) -> Callable[..., str]:
+        @wraps(handler)
+        def call(*args: Any, **kwargs: Any) -> str:
+            client_state.clients = []
+            try:
+                return handler(*args, **kwargs)
+            finally:
+                for client in client_state.clients:
+                    close = getattr(client, "close", None)
+                    if callable(close):
+                        close()
+                client_state.clients = None
+        return call
+
+    return {name: wrap(handler) for name, handler in handlers.items()}
 
 
 GITHUB_IDENTITY_SCHEMA = {
@@ -305,23 +335,24 @@ GITHUB_REVIEW_PR_SCHEMA = {
             "number": {"type": "integer", "description": "Pull request number."},
             "event": {"type": "string", "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"], "description": "Review event."},
             "body": {"type": "string", "description": "Markdown review body."},
+            "commit_id": {"type": "string", "description": "Full 40-character PR head SHA this review applies to; it must still match the live PR head."},
             "comments": {
                 "type": "array",
-                "description": "Optional inline comments. Each needs path and body; line, side, and commit_id are optional.",
+                "description": "Optional inline comments. Each needs path, body, and either diff position or line plus side.",
                 "items": {
                     "type": "object",
                     "properties": {
                         "path": {"type": "string"},
-                        "line": {"type": "integer"},
+                        "position": {"type": "integer", "minimum": 1},
+                        "line": {"type": "integer", "minimum": 1},
                         "side": {"type": "string", "enum": ["LEFT", "RIGHT"]},
                         "body": {"type": "string"},
-                        "commit_id": {"type": "string"},
                     },
                     "required": ["path", "body"],
                 },
             },
         },
-        "required": ["repo", "number", "event"],
+        "required": ["repo", "number", "event", "commit_id"],
     },
 }
 
@@ -335,8 +366,9 @@ GITHUB_MERGE_PR_SCHEMA = {
             "number": {"type": "integer", "description": "Pull request number."},
             "method": {"type": "string", "enum": ["squash", "merge", "rebase"], "description": "Merge method."},
             "commit_title": {"type": "string", "description": "Optional merge commit title."},
+            "expected_head_sha": {"type": "string", "description": "Exact PR head SHA required for merge; merge is rejected if the head has changed."},
         },
-        "required": ["repo", "number"],
+        "required": ["repo", "number", "expected_head_sha"],
     },
 }
 
