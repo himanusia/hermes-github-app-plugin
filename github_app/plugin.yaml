@@ -11,6 +11,8 @@ provides_tools:
   - github_get_issue
   - github_review_pr
   - github_merge_pr
+provides_hooks:
+  - pre_tool_call
 python_dependencies:
   - "PyJWT>=2.8,<3"
   - "cryptography>=42,<45"
