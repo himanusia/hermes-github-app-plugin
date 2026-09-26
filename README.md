@@ -11,13 +11,14 @@ The drop-in directory is:
 $HERMES_HOME/plugins/github_app/
 ```
 
-For the default profile this is `~/.hermes/plugins/github_app/`. It can also be
-packaged and installed with the `hermes.plugin` entry point in `pyproject.toml`.
-The plugin uses only the Python standard library plus `PyJWT` and
-`cryptography` for GitHub App signing.
-
-Enable it by adding `github_app` to the existing `plugins.enabled` list. Do not
-overwrite the list because it may contain other user plugins.
+For the default profile this is `~/.hermes/plugins/github_app/`. Copy this
+repository's `github_app/` folder directly to that location; it contains the
+runtime files, imports, and `plugin.yaml`. Then run
+`hermes plugins enable github_app` to enable it and install its declared Python
+dependencies. Alternatively, install the distribution into Hermes' Python
+environment from the repository root with `python -m pip install .`. Then run
+`hermes plugins enable github_app`; Hermes discovers the entry point on the next
+startup.
 
 ## Credentials
 
@@ -37,6 +38,30 @@ private-key values.
 Fallbacks are `GITHUB_TOKEN`, `GH_TOKEN`, and an already-authenticated `gh`
 CLI. App credentials always win over human credentials.
 
+## GitHub Enterprise
+
+`GITHUB_API_URL` sets the process-wide REST API base. For profiles that need a
+different host, set the per-profile plugin setting
+`plugins.entries.github_app.settings.api_url`, which takes precedence over the
+process variable. Do not put this non-secret URL in `.env`.
+
+```yaml
+plugins:
+  entries:
+    github_app:
+      settings:
+        api_url: https://ghe.example.com/api/v3
+        # Optional: required to use `gh` CLI auth from a routed profile.
+        gh_config_dir: /path/to/that-profile/gh-config
+```
+
+GitHub.com defaults to `https://api.github.com`; GitHub Enterprise Server uses
+`https://HOSTNAME/api/v3`. Only HTTPS URLs without userinfo, query strings, or
+fragments are accepted. The `gh` CLI fallback is scoped to the matching
+hostname. In multi-profile/routed sessions it is disabled unless that profile
+has its own `gh_config_dir`; inherited process tokens are removed before the
+CLI runs. Profile-scoped `GITHUB_TOKEN`/`GH_TOKEN` credentials remain supported.
+
 ## Tools
 
 - `github_identity` (read-only)
@@ -49,7 +74,9 @@ CLI. App credentials always win over human credentials.
 
 All tools are namespaced in the `github_app` toolset. Every result includes
 `attribution: {auth_method, actor}`. Repository references must be explicit
-`owner/name`; bare names are rejected rather than guessed.
+`owner/name`; bare names are rejected rather than guessed. Every write also goes
+through Hermes' request-bound operator approval gate, in addition to requiring
+`allow_write_actions`.
 
 Write actions are fail-closed. Enable them only in the plugin's settings:
 
@@ -68,9 +95,7 @@ and review policy still applies.
 ## Test
 
 ```bash
-PYTHONPATH="$HERMES_HOME/plugins" \
-  "$HERMES_HOME/hermes-agent/venv/bin/python" -m pytest -q \
-  "$HERMES_HOME/plugins/github_app/tests"
+python -m pytest tests/test_github_app.py -q
 ```
 
 The tests use a fake transport and never contact GitHub.
