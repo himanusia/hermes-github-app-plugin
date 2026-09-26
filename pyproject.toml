@@ -9,7 +9,7 @@ description = "Standalone GitHub App connector for Hermes Agent"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "PyJWT>=2.8,<3",
-  "cryptography>=42,<45",
+  "cryptography>=42,<51",
 ]
 
 [project.entry-points."hermes_agent.plugins"]

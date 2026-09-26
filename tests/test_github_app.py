@@ -501,7 +501,8 @@ def test_directory_install_folder_contains_importable_package_and_manifest() -> 
     assert (plugin_dir / "__init__.py").is_file()
     manifest = yaml.safe_load((plugin_dir / "plugin.yaml").read_text())
     assert manifest["name"] == "github_app"
-    assert manifest["python_dependencies"] == ["PyJWT>=2.8,<3", "cryptography>=42,<45"]
+    project = tomllib.loads((plugin_dir.parent / "pyproject.toml").read_text())
+    assert manifest["python_dependencies"] == project["project"]["dependencies"]
     assert (plugin_dir.parent / "github_app").resolve() == plugin_dir.resolve()
 
 
